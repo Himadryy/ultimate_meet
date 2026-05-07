@@ -26,7 +26,7 @@ interface RelayIceRequest extends RelayRequestBase {
   candidate: IceCandidatePayload;
 }
 
-const DEFAULT_SIGNALING_URL = "ws://localhost:8080";
+const DEFAULT_SIGNALING_URL = import.meta.env.VITE_SIGNALING_URL ?? "ws://localhost:8080";
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 30000;
 const RECONNECT_MAX_ATTEMPTS = 6;

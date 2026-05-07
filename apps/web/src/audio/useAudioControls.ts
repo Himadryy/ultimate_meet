@@ -188,6 +188,27 @@ export function useAudioControls(options: UseAudioControlsOptions) {
     setSelectedOutputId(deviceId);
   }, []);
 
+  const attachOutputStream = useCallback(
+    async (stream: MediaStream | null) => {
+      const element = outputAudioRef.current;
+      if (!element) {
+        return;
+      }
+      if (element.srcObject !== stream) {
+        element.srcObject = stream;
+      }
+      if (!stream) {
+        return;
+      }
+      try {
+        await element.play();
+      } catch (error) {
+        setAudioError(error instanceof Error ? error.message : "Could not play remote audio output.");
+      }
+    },
+    []
+  );
+
   useEffect(() => {
     streamRef.current?.getAudioTracks().forEach((track) => {
       track.enabled = !micMuted;
@@ -258,6 +279,7 @@ export function useAudioControls(options: UseAudioControlsOptions) {
     supportsOutputSelection,
     hasHeadphones,
     outputAudioRef,
+    attachOutputStream,
     setSpeakerMuted,
     setSpeakerVolumePct,
     selectInputDevice,

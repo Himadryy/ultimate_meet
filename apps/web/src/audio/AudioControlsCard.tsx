@@ -161,7 +161,7 @@ export function AudioControlsCard(props: AudioControlsCardProps) {
       )}
 
       {audioError && <p className="status status-error">Audio issue: {audioError}</p>}
-      <audio ref={outputAudioRef} className="hidden-audio" />
+      <audio ref={outputAudioRef} className="hidden-audio" autoPlay playsInline />
     </section>
   );
 }

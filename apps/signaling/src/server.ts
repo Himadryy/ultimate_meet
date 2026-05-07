@@ -3,7 +3,7 @@ import type { ClientToServerMessage, ServerToClientMessage } from "@ultimate-mee
 import { clientMessageSchema } from "./messageSchema.js";
 import { RoomStateMachine } from "./roomState.js";
 import { SignalingTelemetry } from "./telemetry.js";
-import { verifyGuestToken } from "@ultimate-meet/shared";
+import { verifyGuestToken } from "@ultimate-meet/shared/node";
 import crypto from "crypto";
 import { PubSub } from "./pubsub.js";
 import type { ClusterEvent } from "@ultimate-meet/shared";

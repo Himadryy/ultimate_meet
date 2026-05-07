@@ -5,5 +5,4 @@ export * from "./mediaTelemetry.js";
 export * from "./protocol.js";
 export * from "./roomLimits.js";
 export * from "./streamRouting.js";
-export * from "./auth.js";
 export * from "./cluster.js";

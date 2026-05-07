@@ -217,11 +217,21 @@ export class RoomStateMachine {
       return { allowed: false, code: "participant_not_found" };
     }
 
-    if (channel === "stream" && from.role !== "streamer") {
-      return { allowed: false, code: "stream_channel_requires_streamer_source" };
+    if (channel === "stream") {
+      const isStreamerViewerPair =
+        (from.role === "streamer" && to.role === "viewer") ||
+        (from.role === "viewer" && to.role === "streamer");
+      if (!isStreamerViewerPair) {
+        return { allowed: false, code: "stream_channel_requires_streamer_source" };
+      }
     }
-    if (channel === "talkback" && from.role === "viewer" && !from.talkbackEnabled) {
-      return { allowed: false, code: "talkback_disabled" };
+    if (channel === "talkback") {
+      if (from.role !== "viewer" || to.role !== "streamer") {
+        return { allowed: false, code: "talkback_channel_requires_viewer_source" };
+      }
+      if (!from.talkbackEnabled || from.muted) {
+        return { allowed: false, code: "talkback_disabled" };
+      }
     }
 
     return { allowed: true };

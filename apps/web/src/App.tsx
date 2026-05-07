@@ -25,15 +25,6 @@ export default function App() {
 
   const signaling = useSignalingRoom();
   const { connected, self, setTalkback } = signaling;
-  const { localStream, remoteStream, streamStatus, networkMetrics, videoFps, activeVideoLayer } = useStreamChannel({
-    roomId: signaling.roomId,
-    self: signaling.self,
-    participants: signaling.participants,
-    lastMessage: signaling.lastMessage,
-    sendRelayOffer: signaling.sendRelayOffer,
-    sendRelayAnswer: signaling.sendRelayAnswer,
-    sendRelayIce: signaling.sendRelayIce
-  });
 
   useEffect(() => {
     setSupportsEchoCancellation(
@@ -61,16 +52,34 @@ export default function App() {
     setTalkback(talkbackEnabled);
   }, [connected, role, setTalkback, talkbackEnabled]);
 
+  const captureAudioPolicy = useMemo(
+    () =>
+      buildAudioConfig(role, {
+        supportsEchoCancellation,
+        hasHeadphones: false,
+        outputVolumePct: 45,
+        noisyEnvironment: false
+      }),
+    [role, supportsEchoCancellation]
+  );
+
   const audioControls = useAudioControls({
-    audioPolicy: {
-      autoEnableAutoGainControl: true,
-      autoEnableEchoCancellation: supportsEchoCancellation,
-      autoEnableNoiseSuppression: false,
-      viewerMicDefaultMuted: role === "viewer",
-      warnings: []
-    },
-    initialMicMuted: role === "viewer",
+    audioPolicy: captureAudioPolicy,
+    initialMicMuted: captureAudioPolicy.viewerMicDefaultMuted,
     initialSpeakerVolumePct: 45
+  });
+
+  const { localStream, remoteStream, streamStatus, networkMetrics, videoFps, activeVideoLayer } = useStreamChannel({
+    roomId: signaling.roomId,
+    self: signaling.self,
+    participants: signaling.participants,
+    lastMessage: signaling.lastMessage,
+    audioPolicy: captureAudioPolicy,
+    preferredInputDeviceId: audioControls.selectedInputId,
+    micMuted: audioControls.micMuted,
+    sendRelayOffer: signaling.sendRelayOffer,
+    sendRelayAnswer: signaling.sendRelayAnswer,
+    sendRelayIce: signaling.sendRelayIce
   });
 
   const audioContext = useMemo(
@@ -102,6 +111,10 @@ export default function App() {
     audioLevelPct: audioControls.micLevelPct,
     refreshMs: TELEMETRY_REFRESH_MS
   });
+
+  useEffect(() => {
+    void audioControls.attachOutputStream(remoteStream);
+  }, [audioControls.attachOutputStream, remoteStream]);
 
   function joinRoom() {
     const nextParticipantId = participantId.trim();

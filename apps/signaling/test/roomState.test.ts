@@ -24,6 +24,33 @@ function runTests() {
   const updatedOff = m.setTalkback('room-talkback', 'p-talk', false);
   assert.strictEqual(updatedOff.talkbackEnabled, false, 'talkback should be disabled after toggle off');
 
+  // Relay policy for stream channel should allow WebRTC negotiation both directions
+  m.join('room-relay', 'host', 'streamer');
+  m.join('room-relay', 'viewer', 'viewer');
+  assert.strictEqual(
+    m.canRelay('room-relay', 'host', 'viewer', 'stream').allowed,
+    true,
+    'stream relay should allow streamer -> viewer'
+  );
+  assert.strictEqual(
+    m.canRelay('room-relay', 'viewer', 'host', 'stream').allowed,
+    true,
+    'stream relay should allow viewer -> streamer for answer/ICE'
+  );
+
+  // Talkback requires viewer -> streamer and explicit talkback enablement
+  assert.strictEqual(
+    m.canRelay('room-relay', 'viewer', 'host', 'talkback').allowed,
+    false,
+    'talkback relay should be blocked before enabling talkback'
+  );
+  m.setTalkback('room-relay', 'viewer', true);
+  assert.strictEqual(
+    m.canRelay('room-relay', 'viewer', 'host', 'talkback').allowed,
+    true,
+    'talkback relay should be allowed after viewer enables talkback'
+  );
+
   console.log('All RoomStateMachine tests passed');
 }
 

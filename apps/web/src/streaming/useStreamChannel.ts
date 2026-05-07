@@ -6,6 +6,7 @@ import {
   DEFAULT_VIDEO_LAYERS,
   findActiveStreamer,
   listStreamRecipients,
+  type AudioConfig,
   type IceCandidatePayload,
   type NetworkMetrics,
   type ParticipantInfo,
@@ -19,6 +20,12 @@ interface UseStreamChannelInput {
   self: ParticipantInfo | null;
   participants: ParticipantInfo[];
   lastMessage: ServerToClientMessage | null;
+  audioPolicy: Pick<
+    AudioConfig,
+    "autoEnableEchoCancellation" | "autoEnableNoiseSuppression" | "autoEnableAutoGainControl"
+  >;
+  preferredInputDeviceId: string;
+  micMuted: boolean;
   sendRelayOffer: (request: { toId: string; channel: "stream"; sdp: string }) => boolean;
   sendRelayAnswer: (request: { toId: string; channel: "stream"; sdp: string }) => boolean;
   sendRelayIce: (request: {
@@ -96,6 +103,9 @@ export function useStreamChannel({
   self,
   participants,
   lastMessage,
+  audioPolicy,
+  preferredInputDeviceId,
+  micMuted,
   sendRelayOffer,
   sendRelayAnswer,
   sendRelayIce
@@ -245,30 +255,43 @@ export function useStreamChannel({
       return null;
     }
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
+      try {
+        const audioConstraint: MediaTrackConstraints = {
+          echoCancellation: audioPolicy.autoEnableEchoCancellation,
+          noiseSuppression: audioPolicy.autoEnableNoiseSuppression,
+          autoGainControl: audioPolicy.autoEnableAutoGainControl
+        };
+        if (preferredInputDeviceId) {
+          audioConstraint.deviceId = { exact: preferredInputDeviceId };
         }
-      });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: audioConstraint
+        });
 
-      const videoTrack = stream.getVideoTracks()[0] ?? null;
-      if (videoTrack) {
-        await applyTrackConstraints(videoTrack, activeLayerRef.current);
-      }
+        const videoTrack = stream.getVideoTracks()[0] ?? null;
+        if (videoTrack) {
+          await applyTrackConstraints(videoTrack, activeLayerRef.current);
+        }
+        stream.getAudioTracks().forEach((track) => {
+          track.enabled = !micMuted;
+        });
 
-      localStreamRef.current = stream;
-      setLocalStream(stream);
-      setStreamStatus("Publishing local stream to viewers.");
-      return stream;
+        localStreamRef.current = stream;
+        setLocalStream(stream);
+        setStreamStatus("Publishing local stream to viewers.");
+        return stream;
     } catch {
       setStreamStatus("Could not access camera/microphone.");
       return null;
     }
-  }, []);
+  }, [audioPolicy, micMuted, preferredInputDeviceId]);
+
+  useEffect(() => {
+    localStreamRef.current?.getAudioTracks().forEach((track) => {
+      track.enabled = !micMuted;
+    });
+  }, [micMuted]);
 
   const publishToViewer = useCallback(
     async (viewerId: string) => {

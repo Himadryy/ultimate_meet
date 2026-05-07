@@ -51,7 +51,7 @@ export function MediaStage({ role, localStream, remoteStream }: MediaStageProps)
           <MediaTile
             title="Streamer feed"
             stream={remoteStream}
-            muted={false}
+            muted
             placeholder="Waiting for streamer media."
           />
         )}
