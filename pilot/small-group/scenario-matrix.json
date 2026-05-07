@@ -1,0 +1,261 @@
+{
+  "targetRoomSize": {
+    "streamers": 1,
+    "viewers": 4
+  },
+  "participants": {
+    "streamerId": "streamer-main",
+    "viewerIds": ["viewer-a", "viewer-b", "viewer-c", "viewer-d"]
+  },
+  "scenarios": [
+    {
+      "id": "gameplay-stream-wired-plus-wifi",
+      "name": "Gameplay stream with selective talkback",
+      "goal": "Validate high-motion gameplay stream while two viewers request voice talkback.",
+      "deviceProfile": {
+        "streamer": "Desktop, wired ethernet, USB headset",
+        "viewers": [
+          "Laptop Wi-Fi + headphones",
+          "Laptop Wi-Fi + speakers",
+          "Mobile Wi-Fi + earbuds",
+          "Desktop Wi-Fi + speakers"
+        ]
+      },
+      "networkPhases": [
+        {
+          "label": "Warmup stable",
+          "networkMetrics": {
+            "rttMs": 38,
+            "jitterMs": 6,
+            "packetLossPct": 0.2,
+            "availableBitrateKbps": 2900,
+            "cpuLoadPct": 46
+          },
+          "fps": 30,
+          "audioLevelPct": 24,
+          "talkbackEnabled": false
+        },
+        {
+          "label": "Viewer chatter burst",
+          "networkMetrics": {
+            "rttMs": 58,
+            "jitterMs": 12,
+            "packetLossPct": 1.2,
+            "availableBitrateKbps": 2200,
+            "cpuLoadPct": 57
+          },
+          "fps": 29,
+          "audioLevelPct": 39,
+          "talkbackEnabled": true
+        },
+        {
+          "label": "Recovered steady state",
+          "networkMetrics": {
+            "rttMs": 44,
+            "jitterMs": 8,
+            "packetLossPct": 0.4,
+            "availableBitrateKbps": 2500,
+            "cpuLoadPct": 50
+          },
+          "fps": 30,
+          "audioLevelPct": 26,
+          "talkbackEnabled": true
+        }
+      ],
+      "talkbackPlan": {
+        "enableViewers": ["viewer-a", "viewer-c"],
+        "invalidAttemptBy": "viewer-b"
+      },
+      "echoChecks": [
+        {
+          "id": "streamer-headset",
+          "role": "streamer",
+          "expectedMaxLevel": "low",
+          "deviceContext": {
+            "supportsEchoCancellation": true,
+            "hasHeadphones": true,
+            "outputVolumePct": 45,
+            "noisyEnvironment": false
+          }
+        },
+        {
+          "id": "viewer-speakers-mid-volume",
+          "role": "viewer",
+          "expectedMaxLevel": "medium",
+          "deviceContext": {
+            "supportsEchoCancellation": true,
+            "hasHeadphones": false,
+            "outputVolumePct": 62,
+            "noisyEnvironment": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "voice-priority-mobile-mix",
+      "name": "Voice-priority mixed mobile session",
+      "goal": "Validate voice clarity and talkback policy when most participants are on mobile links.",
+      "deviceProfile": {
+        "streamer": "Laptop on Wi-Fi, built-in mic",
+        "viewers": [
+          "Android LTE + speakerphone",
+          "iOS Wi-Fi + earbuds",
+          "Laptop Wi-Fi + headset",
+          "Tablet Wi-Fi + speakers"
+        ]
+      },
+      "networkPhases": [
+        {
+          "label": "Nominal",
+          "networkMetrics": {
+            "rttMs": 72,
+            "jitterMs": 14,
+            "packetLossPct": 1.4,
+            "availableBitrateKbps": 1350,
+            "cpuLoadPct": 52
+          },
+          "fps": 24,
+          "audioLevelPct": 37,
+          "talkbackEnabled": false
+        },
+        {
+          "label": "Cell handover dip",
+          "networkMetrics": {
+            "rttMs": 168,
+            "jitterMs": 28,
+            "packetLossPct": 4.8,
+            "availableBitrateKbps": 880,
+            "cpuLoadPct": 67
+          },
+          "fps": 19,
+          "audioLevelPct": 48,
+          "talkbackEnabled": true
+        },
+        {
+          "label": "Stabilized",
+          "networkMetrics": {
+            "rttMs": 96,
+            "jitterMs": 17,
+            "packetLossPct": 2.2,
+            "availableBitrateKbps": 1160,
+            "cpuLoadPct": 58
+          },
+          "fps": 23,
+          "audioLevelPct": 42,
+          "talkbackEnabled": true
+        }
+      ],
+      "talkbackPlan": {
+        "enableViewers": ["viewer-b", "viewer-d"],
+        "invalidAttemptBy": "viewer-a"
+      },
+      "echoChecks": [
+        {
+          "id": "mobile-speakerphone",
+          "role": "viewer",
+          "expectedMaxLevel": "high",
+          "deviceContext": {
+            "supportsEchoCancellation": true,
+            "hasHeadphones": false,
+            "outputVolumePct": 78,
+            "noisyEnvironment": true
+          }
+        },
+        {
+          "id": "laptop-headset",
+          "role": "viewer",
+          "expectedMaxLevel": "low",
+          "deviceContext": {
+            "supportsEchoCancellation": true,
+            "hasHeadphones": true,
+            "outputVolumePct": 38,
+            "noisyEnvironment": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "mixed-device-network-stress",
+      "name": "Mixed devices under network stress",
+      "goal": "Stress adaptive quality controls while guarding against talkback misuse and echo regressions.",
+      "deviceProfile": {
+        "streamer": "Desktop Wi-Fi, external mic, speakers",
+        "viewers": [
+          "Desktop wired + headset",
+          "Laptop congested Wi-Fi + speakers",
+          "Mobile LTE + earbuds",
+          "Tablet hotspot + speakers"
+        ]
+      },
+      "networkPhases": [
+        {
+          "label": "Pre-stress",
+          "networkMetrics": {
+            "rttMs": 92,
+            "jitterMs": 18,
+            "packetLossPct": 1.8,
+            "availableBitrateKbps": 1500,
+            "cpuLoadPct": 61
+          },
+          "fps": 26,
+          "audioLevelPct": 33,
+          "talkbackEnabled": false
+        },
+        {
+          "label": "Acute congestion",
+          "networkMetrics": {
+            "rttMs": 284,
+            "jitterMs": 51,
+            "packetLossPct": 10.4,
+            "availableBitrateKbps": 420,
+            "cpuLoadPct": 94
+          },
+          "fps": 14,
+          "audioLevelPct": 55,
+          "talkbackEnabled": true
+        },
+        {
+          "label": "Post-congestion",
+          "networkMetrics": {
+            "rttMs": 122,
+            "jitterMs": 21,
+            "packetLossPct": 3.2,
+            "availableBitrateKbps": 980,
+            "cpuLoadPct": 73
+          },
+          "fps": 21,
+          "audioLevelPct": 41,
+          "talkbackEnabled": true
+        }
+      ],
+      "talkbackPlan": {
+        "enableViewers": ["viewer-a", "viewer-d"],
+        "invalidAttemptBy": "viewer-c"
+      },
+      "echoChecks": [
+        {
+          "id": "streamer-speakers-high-volume",
+          "role": "streamer",
+          "expectedMaxLevel": "high",
+          "deviceContext": {
+            "supportsEchoCancellation": true,
+            "hasHeadphones": false,
+            "outputVolumePct": 82,
+            "noisyEnvironment": true
+          }
+        },
+        {
+          "id": "viewer-headset-stable",
+          "role": "viewer",
+          "expectedMaxLevel": "low",
+          "deviceContext": {
+            "supportsEchoCancellation": true,
+            "hasHeadphones": true,
+            "outputVolumePct": 34,
+            "noisyEnvironment": false
+          }
+        }
+      ]
+    }
+  ]
+}

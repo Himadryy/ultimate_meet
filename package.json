@@ -1,0 +1,19 @@
+{
+  "name": "ultimate-meet",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @ultimate-meet/shared && npm run build -w @ultimate-meet/signaling && npm run build -w @ultimate-meet/web",
+    "test": "npm run test -w @ultimate-meet/shared",
+    "pilot:small-group": "npm run build && node scripts/run-small-group-pilot.mjs",
+    "dev:signaling": "npm run dev -w @ultimate-meet/signaling",
+    "dev:web": "npm run dev -w @ultimate-meet/web"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

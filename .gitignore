@@ -1,0 +1,26 @@
+node_modules
+dist
+.DS_Store
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Logs and telemetry
+*.log
+*.pid
+pilot/telemetry_snapshot.json
+pilot/*.log
+pilot/*.pid
+bench/results
+
+# Keys and certs
+*.key
+*.pem
+*.crt
+*.p12
+secrets.json
+
+# Editor
+.vscode
