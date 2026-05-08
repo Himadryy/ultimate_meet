@@ -15,6 +15,7 @@ interface AudioControlsCardProps {
   supportsOutputSelection: boolean;
   talkbackEnabled: boolean;
   canToggleTalkback: boolean;
+  talkbackRestrictionReason: string | null;
   audioError: string | null;
   policyWarnings: string[];
   echoRiskLevel: "low" | "medium" | "high";
@@ -43,6 +44,7 @@ export function AudioControlsCard(props: AudioControlsCardProps) {
     supportsOutputSelection,
     talkbackEnabled,
     canToggleTalkback,
+    talkbackRestrictionReason,
     audioError,
     policyWarnings,
     echoRiskLevel,
@@ -59,7 +61,7 @@ export function AudioControlsCard(props: AudioControlsCardProps) {
 
   return (
     <section className="card">
-      <h2>Audio Controls & Diagnostics</h2>
+      <h2>Audio Studio</h2>
       <div className="control-row">
         <button type="button" onClick={onToggleMicMuted}>
           {micMuted ? "Unmute Mic" : "Mute Mic"}
@@ -136,6 +138,9 @@ export function AudioControlsCard(props: AudioControlsCardProps) {
           />
         </label>
       )}
+      {role === "viewer" && talkbackRestrictionReason && (
+        <p className="status status-warning">{talkbackRestrictionReason}</p>
+      )}
 
       <div className={`echo-risk echo-risk-${echoRiskLevel}`}>
         <strong>Echo risk: {echoRiskLevel.toUpperCase()}</strong>
@@ -150,7 +155,7 @@ export function AudioControlsCard(props: AudioControlsCardProps) {
       </div>
 
       {policyWarnings.length > 0 && (
-        <div>
+        <div className="policy-warning-list">
           <strong>Policy warnings</strong>
           <ul>
             {policyWarnings.map((warning) => (

@@ -17,7 +17,7 @@ function formatRelativeTime(collectedAtMs: number): string {
 export function TelemetryDebugPanel({ telemetry, refreshMs }: TelemetryDebugPanelProps) {
   return (
     <section className="card">
-      <h2>Operator Telemetry</h2>
+      <h2>Session Telemetry</h2>
       <p className="status">
         Snapshot refresh cadence: {Math.round(refreshMs / 1000)}s • Updated{" "}
         {formatRelativeTime(telemetry.collectedAtMs)}

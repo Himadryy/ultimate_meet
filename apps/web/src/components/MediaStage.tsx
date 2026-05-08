@@ -38,18 +38,18 @@ interface MediaStageProps {
 export function MediaStage({ role, localStream, remoteStream }: MediaStageProps) {
   return (
     <section className="card">
-      <h2>Live Stream</h2>
+      <h2>Live Stage</h2>
       <div className="media-grid">
         {role === "streamer" ? (
           <MediaTile
-            title="Local preview"
+            title="Studio Preview"
             stream={localStream}
             muted
             placeholder="Allow camera/mic permission to publish stream."
           />
         ) : (
           <MediaTile
-            title="Streamer feed"
+            title="Host Feed"
             stream={remoteStream}
             muted
             placeholder="Waiting for streamer media."

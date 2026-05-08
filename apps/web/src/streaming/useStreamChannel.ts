@@ -14,6 +14,7 @@ import {
   type VideoLayer
 } from "@ultimate-meet/shared";
 import { aggregatePeerMetrics, readPeerNetworkMetrics, type StatsSnapshotMap } from "./webrtcMetrics";
+import { DEFAULT_SIGNALING_WS_URL, resolveIceServersEndpoint } from "../network/signalingEndpoints";
 
 interface UseStreamChannelInput {
   roomId: string | null;
@@ -39,12 +40,14 @@ interface UseStreamChannelResult {
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
   streamStatus: string;
+  iceServerStatus: string;
   networkMetrics: NetworkMetrics | null;
   videoFps: number | null;
   activeVideoLayer: VideoLayer;
 }
 
 const DEFAULT_ACTIVE_LAYER = DEFAULT_VIDEO_LAYERS[DEFAULT_VIDEO_LAYERS.length - 1];
+const ICE_SERVERS_ENDPOINT = resolveIceServersEndpoint(DEFAULT_SIGNALING_WS_URL);
 
 function toIcePayload(candidate: RTCIceCandidate): IceCandidatePayload {
   const candidateWithUsername = candidate as RTCIceCandidate & { usernameFragment?: string | null };
@@ -98,6 +101,27 @@ async function applyLayerToPeer(peer: RTCPeerConnection, layer: VideoLayer): Pro
   }
 }
 
+function isIceServer(value: unknown): value is RTCIceServer {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as RTCIceServer;
+  const validUrls = typeof candidate.urls === "string" || Array.isArray(candidate.urls);
+  if (!validUrls) {
+    return false;
+  }
+  if (Array.isArray(candidate.urls) && candidate.urls.some((entry) => typeof entry !== "string")) {
+    return false;
+  }
+  if (candidate.username !== undefined && typeof candidate.username !== "string") {
+    return false;
+  }
+  if (candidate.credential !== undefined && typeof candidate.credential !== "string") {
+    return false;
+  }
+  return true;
+}
+
 export function useStreamChannel({
   roomId,
   self,
@@ -116,6 +140,7 @@ export function useStreamChannel({
   const statsSnapshotsRef = useRef(new Map<string, StatsSnapshotMap>());
   const adaptiveStateRef = useRef(createAdaptiveLayerState(DEFAULT_ACTIVE_LAYER.name));
   const activeLayerRef = useRef(DEFAULT_ACTIVE_LAYER);
+  const iceServersRef = useRef<RTCIceServer[]>([]);
 
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
@@ -123,6 +148,45 @@ export function useStreamChannel({
   const [networkMetrics, setNetworkMetrics] = useState<NetworkMetrics | null>(null);
   const [videoFps, setVideoFps] = useState<number | null>(null);
   const [activeVideoLayer, setActiveVideoLayer] = useState<VideoLayer>(DEFAULT_ACTIVE_LAYER);
+  const [iceServerStatus, setIceServerStatus] = useState("Loading relay profile...");
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadIceServers = async () => {
+      try {
+        const response = await fetch(ICE_SERVERS_ENDPOINT, {
+          method: "GET",
+          headers: { accept: "application/json" }
+        });
+        if (!response.ok) {
+          throw new Error(`ice_http_${response.status}`);
+        }
+        const payload = (await response.json()) as { iceServers?: unknown };
+        const iceServers = Array.isArray(payload.iceServers)
+          ? payload.iceServers.filter((entry): entry is RTCIceServer => isIceServer(entry))
+          : [];
+        if (cancelled) {
+          return;
+        }
+        iceServersRef.current = iceServers;
+        setIceServerStatus(
+          iceServers.length > 0
+            ? `Relay profile loaded (${iceServers.length} ICE routes).`
+            : "No relay routes returned. Falling back to direct ICE."
+        );
+      } catch {
+        if (cancelled) {
+          return;
+        }
+        iceServersRef.current = [];
+        setIceServerStatus("Relay bootstrap unavailable. Falling back to direct ICE.");
+      }
+    };
+    void loadIceServers();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const applyLayerToOutbound = useCallback(async (layer: VideoLayer) => {
     const localVideoTrack = localStreamRef.current?.getVideoTracks()[0] ?? null;
@@ -209,7 +273,9 @@ export function useStreamChannel({
         return existing;
       }
 
-      const peer = new RTCPeerConnection();
+      const peer = new RTCPeerConnection(
+        iceServersRef.current.length > 0 ? { iceServers: iceServersRef.current } : undefined
+      );
 
       peer.onicecandidate = (event) => {
         if (!event.candidate || !self || !roomId) {
@@ -594,6 +660,7 @@ export function useStreamChannel({
     localStream,
     remoteStream,
     streamStatus,
+    iceServerStatus,
     networkMetrics,
     videoFps,
     activeVideoLayer

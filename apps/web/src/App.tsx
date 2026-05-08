@@ -52,7 +52,7 @@ export default function App() {
     setTalkback(talkbackEnabled);
   }, [connected, role, setTalkback, talkbackEnabled]);
 
-  const captureAudioPolicy = useMemo(
+  const bootstrapAudioPolicy = useMemo(
     () =>
       buildAudioConfig(role, {
         supportsEchoCancellation,
@@ -64,22 +64,9 @@ export default function App() {
   );
 
   const audioControls = useAudioControls({
-    audioPolicy: captureAudioPolicy,
-    initialMicMuted: captureAudioPolicy.viewerMicDefaultMuted,
+    audioPolicy: bootstrapAudioPolicy,
+    initialMicMuted: bootstrapAudioPolicy.viewerMicDefaultMuted,
     initialSpeakerVolumePct: 45
-  });
-
-  const { localStream, remoteStream, streamStatus, networkMetrics, videoFps, activeVideoLayer } = useStreamChannel({
-    roomId: signaling.roomId,
-    self: signaling.self,
-    participants: signaling.participants,
-    lastMessage: signaling.lastMessage,
-    audioPolicy: captureAudioPolicy,
-    preferredInputDeviceId: audioControls.selectedInputId,
-    micMuted: audioControls.micMuted,
-    sendRelayOffer: signaling.sendRelayOffer,
-    sendRelayAnswer: signaling.sendRelayAnswer,
-    sendRelayIce: signaling.sendRelayIce
   });
 
   const audioContext = useMemo(
@@ -93,6 +80,22 @@ export default function App() {
   );
 
   const audioPolicy = useMemo(() => buildAudioConfig(role, audioContext), [audioContext, role]);
+  const viewerTalkbackProtectionEnabled =
+    role === "viewer" && !audioControls.hasHeadphones && audioControls.speakerVolumePct > 55;
+
+  const { localStream, remoteStream, streamStatus, iceServerStatus, networkMetrics, videoFps, activeVideoLayer } =
+    useStreamChannel({
+      roomId: signaling.roomId,
+      self: signaling.self,
+      participants: signaling.participants,
+      lastMessage: signaling.lastMessage,
+      audioPolicy,
+      preferredInputDeviceId: audioControls.selectedInputId,
+      micMuted: audioControls.micMuted,
+      sendRelayOffer: signaling.sendRelayOffer,
+      sendRelayAnswer: signaling.sendRelayAnswer,
+      sendRelayIce: signaling.sendRelayIce
+    });
 
   const echoGuidance = useMemo(
     () =>
@@ -142,6 +145,10 @@ export default function App() {
     if (role !== "viewer") {
       return;
     }
+    if (enabled && viewerTalkbackProtectionEnabled) {
+      setStatusOverride("Talkback blocked: connect headphones or reduce speaker volume below 55%.");
+      return;
+    }
 
     setTalkbackEnabled(enabled);
     if (!connected) {
@@ -159,41 +166,51 @@ export default function App() {
 
   return (
     <main className="layout">
-      <h1>Ultimate Meet MVP Foundation</h1>
-
-      <section className="card">
-        <h2>Room Join</h2>
-        <label>
-          Room ID
-          <input value={roomId} onChange={(event) => setRoomId(event.target.value)} />
-        </label>
-        <label>
-          Participant ID
-          <input
-            value={participantId}
-            onChange={(event) => setParticipantId(event.target.value)}
-            placeholder="your-name"
-          />
-        </label>
-        <label>
-          Role
-          <select value={role} onChange={(event) => setRole(event.target.value as ParticipantRole)}>
-            <option value="streamer">Streamer</option>
-            <option value="viewer">Viewer</option>
-          </select>
-        </label>
-        <div className="button-row">
-          <button type="button" onClick={joinRoom}>
-            Join Room
-          </button>
-          <button type="button" onClick={signaling.leaveRoom}>
-            Leave Room
-          </button>
-        </div>
+      <section className="card studio-hero">
+        <h1>Ultimate Meet Studio</h1>
+        <p>
+          Built for high-quality private circles: creator sessions, mentorship, classes, and community rooms.
+        </p>
       </section>
 
+      <div className="workspace-grid">
+        <section className="card">
+          <h2>Session Setup</h2>
+          <label>
+            Room ID
+            <input value={roomId} onChange={(event) => setRoomId(event.target.value)} />
+          </label>
+          <label>
+            Participant ID
+            <input
+              value={participantId}
+              onChange={(event) => setParticipantId(event.target.value)}
+              placeholder="your-name"
+            />
+          </label>
+          <label>
+            Role
+            <select value={role} onChange={(event) => setRole(event.target.value as ParticipantRole)}>
+              <option value="streamer">Streamer</option>
+              <option value="viewer">Viewer</option>
+            </select>
+          </label>
+          <div className="button-row">
+            <button type="button" onClick={joinRoom}>
+              Join Room
+            </button>
+            <button type="button" onClick={signaling.leaveRoom}>
+              Leave Room
+            </button>
+          </div>
+          <p className="status">{statusOverride ?? signaling.status}</p>
+          <p className="status">{iceServerStatus}</p>
+        </section>
+
+        <ParticipantsList participants={signaling.participants} />
+      </div>
+
       <MediaStage role={role} localStream={localStream} remoteStream={remoteStream} />
-      <ParticipantsList participants={signaling.participants} />
 
       <section className="card">
         <h2>Adaptive Stream Policy</h2>
@@ -212,9 +229,8 @@ export default function App() {
           Selected layer: <strong>{activeVideoLayer.name.toUpperCase()}</strong> (
           {activeVideoLayer.width}x{activeVideoLayer.height} @ {activeVideoLayer.fps}fps)
         </p>
+        <p className="status">{streamStatus}</p>
       </section>
-
-      <TelemetryDebugPanel telemetry={telemetry} refreshMs={TELEMETRY_REFRESH_MS} />
 
       <AudioControlsCard
         role={role}
@@ -229,6 +245,11 @@ export default function App() {
         supportsOutputSelection={audioControls.supportsOutputSelection}
         talkbackEnabled={talkbackEnabled}
         canToggleTalkback={role === "viewer" && connected && self?.role === "viewer"}
+        talkbackRestrictionReason={
+          viewerTalkbackProtectionEnabled
+            ? "Talkback requires headphones or lower speaker volume (<55%)."
+            : null
+        }
         audioError={audioControls.audioError}
         policyWarnings={audioPolicy.warnings}
         echoRiskLevel={echoGuidance.level}
@@ -247,8 +268,7 @@ export default function App() {
         onTalkbackChange={updateTalkback}
       />
 
-      <p className="status">{statusOverride ?? signaling.status}</p>
-      <p className="status">{streamStatus}</p>
+      <TelemetryDebugPanel telemetry={telemetry} refreshMs={TELEMETRY_REFRESH_MS} />
       <p className="status">Talkback requested: {talkbackEnabled ? "enabled" : "disabled"}</p>
     </main>
   );

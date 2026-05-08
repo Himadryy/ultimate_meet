@@ -3,15 +3,25 @@ import type { ClientToServerMessage, ServerToClientMessage } from "@ultimate-mee
 import { clientMessageSchema } from "./messageSchema.js";
 import { RoomStateMachine } from "./roomState.js";
 import { SignalingTelemetry } from "./telemetry.js";
-import { verifyGuestToken } from "@ultimate-meet/shared/node";
+import { signGuestToken, verifyGuestToken } from "@ultimate-meet/shared/node";
 import crypto from "crypto";
 import { PubSub } from "./pubsub.js";
 import type { ClusterEvent } from "@ultimate-meet/shared";
+import http from "node:http";
 
 const PORT = Number.parseInt(process.env.SIGNALING_PORT ?? "8080", 10);
 const TELEMETRY_LOG_INTERVAL_MS = Number.parseInt(process.env.SIGNALING_TELEMETRY_INTERVAL_MS ?? "15000", 10);
 const JWT_SECRET = process.env.JWT_SECRET ?? "";
 const ENFORCE_AUTH = Boolean(JWT_SECRET);
+const METERED_APP_NAME = process.env.METERED_APP_NAME ?? "";
+const METERED_API_KEY = process.env.METERED_API_KEY ?? "";
+const METERED_REGION = process.env.METERED_REGION ?? "";
+const METERED_CACHE_TTL_MS = Number.parseInt(process.env.METERED_CACHE_TTL_MS ?? "45000", 10);
+const SIGNALING_GUEST_TOKEN_TTL = process.env.SIGNALING_GUEST_TOKEN_TTL ?? "15m";
+const SIGNALING_ALLOWED_ORIGINS = (process.env.SIGNALING_ALLOWED_ORIGINS ?? "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
 
 if (!ENFORCE_AUTH) {
   console.warn("[signaling] JWT_SECRET not set — running in dev mode (auth disabled)");
@@ -85,6 +95,114 @@ pubsub.subscribe((event: ClusterEvent) => {
     console.warn("[signaling] pubsub handler failed", e);
   }
 });
+
+interface IceServerPayload {
+  urls: string | string[];
+  username?: string;
+  credential?: string;
+}
+
+interface IceServerCacheEntry {
+  value: IceServerPayload[];
+  expiresAtMs: number;
+}
+
+const DEV_FALLBACK_ICE_SERVERS: IceServerPayload[] = [{ urls: "stun:stun.l.google.com:19302" }];
+let iceServerCache: IceServerCacheEntry | null = null;
+
+if (!METERED_APP_NAME || !METERED_API_KEY) {
+  console.warn("[signaling] Metered TURN not fully configured; using fallback ICE behavior.");
+}
+
+function isOriginAllowed(origin: string | undefined): boolean {
+  if (SIGNALING_ALLOWED_ORIGINS.length === 0 || !origin) {
+    return true;
+  }
+  return SIGNALING_ALLOWED_ORIGINS.includes(origin);
+}
+
+function applyCorsHeaders(request: http.IncomingMessage, response: http.ServerResponse): void {
+  const origin = request.headers.origin;
+  if (SIGNALING_ALLOWED_ORIGINS.length === 0) {
+    response.setHeader("Access-Control-Allow-Origin", "*");
+  } else if (origin && SIGNALING_ALLOWED_ORIGINS.includes(origin)) {
+    response.setHeader("Access-Control-Allow-Origin", origin);
+    response.setHeader("Vary", "Origin");
+  }
+  response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  response.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
+}
+
+function isIceServerPayload(value: unknown): value is IceServerPayload {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as IceServerPayload;
+  const validUrls = typeof candidate.urls === "string" || Array.isArray(candidate.urls);
+  if (!validUrls) {
+    return false;
+  }
+  if (Array.isArray(candidate.urls) && candidate.urls.some((entry) => typeof entry !== "string")) {
+    return false;
+  }
+  if (candidate.username !== undefined && typeof candidate.username !== "string") {
+    return false;
+  }
+  if (candidate.credential !== undefined && typeof candidate.credential !== "string") {
+    return false;
+  }
+  return true;
+}
+
+async function fetchMeteredIceServers(): Promise<IceServerPayload[]> {
+  const nowMs = Date.now();
+  if (iceServerCache && nowMs < iceServerCache.expiresAtMs) {
+    return iceServerCache.value;
+  }
+
+  if (!METERED_APP_NAME || !METERED_API_KEY) {
+    return ENFORCE_AUTH ? [] : DEV_FALLBACK_ICE_SERVERS;
+  }
+
+  const query = new URLSearchParams({ apiKey: METERED_API_KEY });
+  if (METERED_REGION) {
+    query.set("region", METERED_REGION);
+  }
+  const endpoint = `https://${METERED_APP_NAME}.metered.live/api/v1/turn/credentials?${query.toString()}`;
+  const response = await fetch(endpoint, { method: "GET" });
+  if (!response.ok) {
+    throw new Error(`metered_request_failed_${response.status}`);
+  }
+
+  const body: unknown = await response.json();
+  if (!Array.isArray(body) || body.some((entry) => !isIceServerPayload(entry))) {
+    throw new Error("metered_invalid_payload");
+  }
+
+  const value = body as IceServerPayload[];
+  iceServerCache = {
+    value,
+    expiresAtMs: nowMs + Math.max(5_000, METERED_CACHE_TTL_MS)
+  };
+  return value;
+}
+
+async function readJsonBody(request: http.IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const chunk of request) {
+    const next = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+    chunks.push(next);
+    bytes += next.length;
+    if (bytes > 16_384) {
+      throw new Error("request_too_large");
+    }
+  }
+  if (chunks.length === 0) {
+    return {};
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
 
 function sendMessage(socket: WebSocket, message: ServerToClientMessage): void {
   try {
@@ -196,8 +314,105 @@ function assertAuthorizedParticipant(
   return true;
 }
 
-const wss = new WebSocketServer({ port: PORT });
-console.log(`[signaling] listening on ws://localhost:${PORT}`);
+const server = http.createServer(async (request, response) => {
+  applyCorsHeaders(request, response);
+  const origin = request.headers.origin;
+  if (!isOriginAllowed(origin)) {
+    response.writeHead(403, { "content-type": "application/json" });
+    response.end(JSON.stringify({ error: "origin_not_allowed" }));
+    return;
+  }
+
+  if (request.method === "OPTIONS") {
+    response.writeHead(204);
+    response.end();
+    return;
+  }
+
+  const url = new URL(request.url ?? "/", "http://localhost");
+  if (request.method === "GET" && url.pathname === "/health") {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ status: "ok" }));
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/guest-token") {
+    try {
+      const payload = (await readJsonBody(request)) as {
+        participantId?: unknown;
+        role?: unknown;
+      };
+      const participantId =
+        typeof payload.participantId === "string" ? payload.participantId.trim() : "";
+      const role = payload.role;
+      if (!participantId || (role !== "streamer" && role !== "viewer")) {
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: "invalid_payload" }));
+        return;
+      }
+      if (!ENFORCE_AUTH) {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ token: null }));
+        return;
+      }
+      const token = signGuestToken(
+        { sub: participantId, role },
+        JWT_SECRET,
+        SIGNALING_GUEST_TOKEN_TTL
+      );
+      response.writeHead(200, {
+        "content-type": "application/json",
+        "cache-control": "no-store"
+      });
+      response.end(JSON.stringify({ token }));
+      return;
+    } catch (error) {
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "invalid_json" }));
+      return;
+    }
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/ice-servers") {
+    try {
+      const iceServers = await fetchMeteredIceServers();
+      response.writeHead(200, {
+        "content-type": "application/json",
+        "cache-control": "no-store"
+      });
+      response.end(JSON.stringify({ iceServers }));
+      return;
+    } catch (error) {
+      console.warn("[signaling] failed to fetch Metered ICE servers", error);
+      response.writeHead(502, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          error: "ice_servers_unavailable",
+          message: "TURN credential provider unavailable."
+        })
+      );
+      return;
+    }
+  }
+
+  response.writeHead(404, { "content-type": "application/json" });
+  response.end(JSON.stringify({ error: "not_found" }));
+});
+
+const wss = new WebSocketServer({ noServer: true });
+server.on("upgrade", (request, socket, head) => {
+  const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
+  if (pathname !== "/" || !isOriginAllowed(request.headers.origin)) {
+    socket.destroy();
+    return;
+  }
+  wss.handleUpgrade(request, socket, head, (ws) => {
+    wss.emit("connection", ws, request);
+  });
+});
+server.listen(PORT, () => {
+  console.log(`[signaling] listening on ws://localhost:${PORT} and http://localhost:${PORT}`);
+});
 const telemetryTimer = setInterval(() => {
   const snapshot = telemetry.flushSnapshot(state.roomCount(), state.participantCount());
   if (
@@ -262,6 +477,34 @@ wss.on("connection", (socket) => {
 
     if (message.type === "join_room") {
       try {
+        if (ENFORCE_AUTH) {
+          if (!message.token) {
+            sendMessage(socket, {
+              type: "error",
+              code: "auth_required",
+              message: "Join token is required."
+            });
+            return;
+          }
+          const claims = verifyGuestToken(message.token, JWT_SECRET);
+          if (claims.sub !== message.participantId) {
+            sendMessage(socket, {
+              type: "error",
+              code: "invalid_token_subject",
+              message: "Token subject does not match participant ID."
+            });
+            return;
+          }
+          if (claims.role && claims.role !== message.role) {
+            sendMessage(socket, {
+              type: "error",
+              code: "invalid_token_role",
+              message: "Token role does not match requested participant role."
+            });
+            return;
+          }
+        }
+
         const participants = state.join(message.roomId, message.participantId, message.role);
         telemetry.recordJoin(message.roomId, message.participantId, message.role);
         participantId = message.participantId;

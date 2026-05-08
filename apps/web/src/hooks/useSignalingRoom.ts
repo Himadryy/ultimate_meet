@@ -6,6 +6,7 @@ import type {
   ParticipantRole,
   ServerToClientMessage
 } from "@ultimate-meet/shared";
+import { DEFAULT_SIGNALING_WS_URL, resolveGuestTokenEndpoint } from "../network/signalingEndpoints";
 
 interface JoinRoomRequest {
   roomId: string;
@@ -26,7 +27,6 @@ interface RelayIceRequest extends RelayRequestBase {
   candidate: IceCandidatePayload;
 }
 
-const DEFAULT_SIGNALING_URL = import.meta.env.VITE_SIGNALING_URL ?? "ws://localhost:8080";
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 30000;
 const RECONNECT_MAX_ATTEMPTS = 6;
@@ -64,7 +64,7 @@ export interface UseSignalingRoomResult {
   sendRelayIce: (request: RelayIceRequest) => boolean;
 }
 
-export function useSignalingRoom(signalingUrl = DEFAULT_SIGNALING_URL): UseSignalingRoomResult {
+export function useSignalingRoom(signalingUrl = DEFAULT_SIGNALING_WS_URL): UseSignalingRoomResult {
   const socketRef = useRef<WebSocket | null>(null);
   const joinRef = useRef<JoinRoomRequest | null>(null);
   const manualCloseRef = useRef(false);
@@ -111,6 +111,31 @@ export function useSignalingRoom(signalingUrl = DEFAULT_SIGNALING_URL): UseSigna
     }
   }, []);
 
+  const requestGuestToken = useCallback(
+    async (request: JoinRoomRequest): Promise<string | null> => {
+      try {
+        const response = await fetch(resolveGuestTokenEndpoint(signalingUrl), {
+          method: "POST",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            participantId: request.participantId,
+            role: request.role
+          })
+        });
+        if (!response.ok) {
+          return null;
+        }
+        const body = (await response.json()) as { token?: unknown };
+        return typeof body.token === "string" && body.token.length > 0 ? body.token : null;
+      } catch {
+        return null;
+      }
+    },
+    [signalingUrl]
+  );
+
   const leaveRoom = useCallback(() => {
     manualCloseRef.current = true;
     if (reconnectTimerRef.current) {
@@ -136,134 +161,138 @@ export function useSignalingRoom(signalingUrl = DEFAULT_SIGNALING_URL): UseSigna
 
   const joinRoom = useCallback(
     (request: JoinRoomRequest) => {
-      // cancel any pending reconnect
-      if (reconnectTimerRef.current) {
-        clearTimeout(reconnectTimerRef.current);
-        reconnectTimerRef.current = null;
-      }
-      manualCloseRef.current = false;
-
-      if (socketRef.current) {
-        try {
-          socketRef.current.close();
-        } catch {}
-      }
-
-      setConnected(false);
-      setRoomId(request.roomId);
-      setSelf(null);
-      setParticipants([]);
-      setLastMessage(null);
-      joinRef.current = request;
-
-      const socket = new WebSocket(signalingUrl);
-      socketRef.current = socket;
-      setStatus(`Connecting to signaling at ${signalingUrl}...`);
-
-      socket.onopen = () => {
-        reconnectAttemptsRef.current = 0;
-        try {
-          socket.send(
-            JSON.stringify({
-              type: "join_room",
-              roomId: request.roomId,
-              participantId: request.participantId,
-              role: request.role
-            } satisfies ClientToServerMessage)
-          );
-        } catch (err) {
-          console.warn("[signaling] failed to send join on open", err);
+      void (async () => {
+        // cancel any pending reconnect
+        if (reconnectTimerRef.current) {
+          clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = null;
         }
-        setConnected(true);
-        setStatus(`Connected to signaling at ${signalingUrl}`);
-        flushQueue(socket);
-      };
+        manualCloseRef.current = false;
 
-      socket.onerror = () => {
-        setStatus("Could not connect to signaling server.");
-      };
+        if (socketRef.current) {
+          try {
+            socketRef.current.close();
+          } catch {}
+        }
 
-      socket.onclose = () => {
-        if (socketRef.current === socket) {
-          socketRef.current = null;
-          setConnected(false);
-          setStatus("Disconnected from signaling server.");
-          // schedule reconnect if appropriate
-          if (joinRef.current && !manualCloseRef.current) {
-            const attempts = reconnectAttemptsRef.current || 0;
-            if (attempts >= RECONNECT_MAX_ATTEMPTS) {
-              setStatus("Max reconnect attempts reached.");
-              joinRef.current = null;
-              return;
-            }
-            const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * Math.pow(2, attempts));
-            reconnectAttemptsRef.current = attempts + 1;
-            setStatus(`Reconnecting in ${delay}ms...`);
-            reconnectTimerRef.current = window.setTimeout(() => {
-              reconnectTimerRef.current = null;
-              if (!joinRef.current) return;
-              joinRoom(joinRef.current);
-            }, delay);
+        setConnected(false);
+        setRoomId(request.roomId);
+        setSelf(null);
+        setParticipants([]);
+        setLastMessage(null);
+        joinRef.current = request;
+
+        const token = await requestGuestToken(request);
+        const socket = new WebSocket(signalingUrl);
+        socketRef.current = socket;
+        setStatus(`Connecting to signaling at ${signalingUrl}...`);
+
+        socket.onopen = () => {
+          reconnectAttemptsRef.current = 0;
+          try {
+            socket.send(
+              JSON.stringify({
+                type: "join_room",
+                roomId: request.roomId,
+                participantId: request.participantId,
+                role: request.role,
+                ...(token ? { token } : {})
+              } satisfies ClientToServerMessage)
+            );
+          } catch (err) {
+            console.warn("[signaling] failed to send join on open", err);
           }
-        }
-      };
+          setConnected(true);
+          setStatus(`Connected to signaling at ${signalingUrl}`);
+          flushQueue(socket);
+        };
 
-      socket.onmessage = (event) => {
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(String(event.data));
-        } catch {
-          setStatus("Received invalid message from signaling server.");
-          return;
-        }
+        socket.onerror = () => {
+          setStatus("Could not connect to signaling server.");
+        };
 
-        if (!isServerMessage(parsed)) {
-          return;
-        }
+        socket.onclose = () => {
+          if (socketRef.current === socket) {
+            socketRef.current = null;
+            setConnected(false);
+            setStatus("Disconnected from signaling server.");
+            // schedule reconnect if appropriate
+            if (joinRef.current && !manualCloseRef.current) {
+              const attempts = reconnectAttemptsRef.current || 0;
+              if (attempts >= RECONNECT_MAX_ATTEMPTS) {
+                setStatus("Max reconnect attempts reached.");
+                joinRef.current = null;
+                return;
+              }
+              const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * Math.pow(2, attempts));
+              reconnectAttemptsRef.current = attempts + 1;
+              setStatus(`Reconnecting in ${delay}ms...`);
+              reconnectTimerRef.current = window.setTimeout(() => {
+                reconnectTimerRef.current = null;
+                if (!joinRef.current) return;
+                joinRoom(joinRef.current);
+              }, delay);
+            }
+          }
+        };
 
-        const message = parsed;
-        setLastMessage(message);
+        socket.onmessage = (event) => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(String(event.data));
+          } catch {
+            setStatus("Received invalid message from signaling server.");
+            return;
+          }
 
-        switch (message.type) {
-          case "joined_room":
-            setRoomId(message.roomId);
-            setSelf(message.you);
-            setParticipants(message.participants);
-            setStatus(`Joined room ${message.roomId} as ${message.you.role}.`);
-            // drain any queued outgoing messages now that we're joined
-            flushQueue();
-            break;
-          case "participant_joined":
-            setParticipants((previous) => upsertParticipant(previous, message.participant));
-            break;
-          case "participant_left":
-            setParticipants((previous) =>
-              previous.filter((participant) => participant.id !== message.participantId)
-            );
-            break;
-          case "talkback_changed":
-            setSelf((previous) =>
-              previous?.id === message.participantId
-                ? { ...previous, talkbackEnabled: message.enabled }
-                : previous
-            );
-            setParticipants((previous) =>
-              previous.map((participant) =>
-                participant.id === message.participantId
-                  ? { ...participant, talkbackEnabled: message.enabled }
-                  : participant
-              )
-            );
-            break;
-          case "error":
-            setStatus(`Server error (${message.code}): ${message.message}`);
-            break;
-          default:
-            break;
-        }
-      };
+          if (!isServerMessage(parsed)) {
+            return;
+          }
+
+          const message = parsed;
+          setLastMessage(message);
+
+          switch (message.type) {
+            case "joined_room":
+              setRoomId(message.roomId);
+              setSelf(message.you);
+              setParticipants(message.participants);
+              setStatus(`Joined room ${message.roomId} as ${message.you.role}.`);
+              // drain any queued outgoing messages now that we're joined
+              flushQueue();
+              break;
+            case "participant_joined":
+              setParticipants((previous) => upsertParticipant(previous, message.participant));
+              break;
+            case "participant_left":
+              setParticipants((previous) =>
+                previous.filter((participant) => participant.id !== message.participantId)
+              );
+              break;
+            case "talkback_changed":
+              setSelf((previous) =>
+                previous?.id === message.participantId
+                  ? { ...previous, talkbackEnabled: message.enabled }
+                  : previous
+              );
+              setParticipants((previous) =>
+                previous.map((participant) =>
+                  participant.id === message.participantId
+                    ? { ...participant, talkbackEnabled: message.enabled }
+                    : participant
+                )
+              );
+              break;
+            case "error":
+              setStatus(`Server error (${message.code}): ${message.message}`);
+              break;
+            default:
+              break;
+          }
+        };
+      })();
     },
-    [signalingUrl, flushQueue]
+    [signalingUrl, flushQueue, requestGuestToken]
   );
 
   const setTalkback = useCallback(

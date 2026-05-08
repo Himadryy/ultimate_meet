@@ -21,7 +21,7 @@ export function buildAudioConfig(
 ): AudioConfig {
   const warnings: string[] = [];
   const autoEnableEchoCancellation = context.supportsEchoCancellation;
-  const autoEnableNoiseSuppression = context.noisyEnvironment;
+  const autoEnableNoiseSuppression = context.noisyEnvironment || role === "viewer";
   const autoEnableAutoGainControl = true;
 
   if (!context.supportsEchoCancellation) {
@@ -29,6 +29,12 @@ export function buildAudioConfig(
   }
   if (!context.hasHeadphones && context.outputVolumePct > 70) {
     warnings.push("Use headphones or reduce volume to avoid acoustic feedback.");
+  }
+  if (role === "viewer" && !context.hasHeadphones && context.outputVolumePct > 45) {
+    warnings.push("Viewer talkback is safest with headphones and speaker volume below 45%.");
+  }
+  if (role === "viewer" && context.outputVolumePct > 60) {
+    warnings.push("Reduce speaker volume below 60% before enabling talkback.");
   }
 
   return {
@@ -39,4 +45,3 @@ export function buildAudioConfig(
     warnings
   };
 }
-

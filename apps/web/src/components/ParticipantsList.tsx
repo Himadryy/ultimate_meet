@@ -7,15 +7,20 @@ interface ParticipantsListProps {
 export function ParticipantsList({ participants }: ParticipantsListProps) {
   return (
     <section className="card">
-      <h2>Participants</h2>
+      <h2>Circle Members ({participants.length})</h2>
       {participants.length === 0 ? (
         <p>No participants joined yet.</p>
       ) : (
         <ul className="participant-list">
           {participants.map((participant) => (
             <li key={participant.id}>
-              <strong>{participant.id}</strong> ({participant.role})
-              {participant.role === "viewer" ? ` · talkback ${participant.talkbackEnabled ? "on" : "off"}` : ""}
+              <strong>{participant.id}</strong>
+              <span className={`participant-chip participant-chip-${participant.role}`}>{participant.role}</span>
+              {participant.role === "viewer" && (
+                <span className="participant-meta">
+                  talkback {participant.talkbackEnabled ? "on" : "off"}
+                </span>
+              )}
             </li>
           ))}
         </ul>

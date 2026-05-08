@@ -6,7 +6,7 @@ import {
 } from "../src/adaptation.js";
 
 describe("chooseVideoLayer", () => {
-  it("selects high layer when network is healthy", () => {
+  it("selects fullhd layer when network is healthy", () => {
     const layer = chooseVideoLayer({
       rttMs: 35,
       jitterMs: 5,
@@ -14,7 +14,7 @@ describe("chooseVideoLayer", () => {
       availableBitrateKbps: 4000,
       cpuLoadPct: 35
     });
-    expect(layer.name).toBe("high");
+    expect(layer.name).toBe("fullhd");
   });
 
   it("downshifts for weak network conditions", () => {
@@ -44,13 +44,8 @@ describe("chooseVideoLayer", () => {
     state = first.state;
 
     const second = chooseAdaptiveVideoLayer(healthyMetrics, state, { nowMs: 12_000 });
-    expect(second.changed).toBe(false);
-    expect(second.layer.name).toBe("mid");
-    state = second.state;
-
-    const third = chooseAdaptiveVideoLayer(healthyMetrics, state, { nowMs: 14_000 });
-    expect(third.changed).toBe(true);
-    expect(third.layer.name).toBe("high");
+    expect(second.changed).toBe(true);
+    expect(second.layer.name).toBe("high");
   });
 
   it("drops immediately under emergency conditions despite cooldown", () => {

@@ -39,7 +39,7 @@ export function buildEchoRiskGuidance(
   if (score >= 5) {
     return {
       level: "high",
-      summary: "High echo risk detected. Keep mic muted unless talkback is needed.",
+      summary: "High echo risk detected. Keep mic muted and use short talkback bursts only.",
       recommendations
     };
   }

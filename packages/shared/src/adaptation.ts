@@ -7,7 +7,7 @@ export interface NetworkMetrics {
 }
 
 export interface VideoLayer {
-  name: "low" | "mid" | "high";
+  name: string;
   width: number;
   height: number;
   fps: number;
@@ -17,7 +17,9 @@ export interface VideoLayer {
 export const DEFAULT_VIDEO_LAYERS: VideoLayer[] = [
   { name: "low", width: 640, height: 360, fps: 15, targetBitrateKbps: 450 },
   { name: "mid", width: 960, height: 540, fps: 24, targetBitrateKbps: 950 },
-  { name: "high", width: 1280, height: 720, fps: 30, targetBitrateKbps: 1800 }
+  { name: "high", width: 1280, height: 720, fps: 30, targetBitrateKbps: 1800 },
+  { name: "hd", width: 1600, height: 900, fps: 30, targetBitrateKbps: 2400 },
+  { name: "fullhd", width: 1920, height: 1080, fps: 30, targetBitrateKbps: 3200 }
 ];
 
 type VideoLayerName = VideoLayer["name"];
@@ -47,13 +49,13 @@ export interface AdaptiveLayerResult {
 }
 
 const DEFAULT_ADAPTIVE_TUNING: AdaptiveLayerTuning = {
-  switchCooldownMs: 8_000,
-  upgradeVotesRequired: 3,
+  switchCooldownMs: 7_000,
+  upgradeVotesRequired: 2,
   downgradeVotesRequired: 2,
-  emergencyPacketLossPct: 9,
-  emergencyRttMs: 260,
-  emergencyJitterMs: 45,
-  emergencyCpuLoadPct: 92
+  emergencyPacketLossPct: 8,
+  emergencyRttMs: 220,
+  emergencyJitterMs: 35,
+  emergencyCpuLoadPct: 90
 };
 
 function scoreMetrics(metrics: NetworkMetrics): number {
@@ -84,7 +86,7 @@ function clampLayerByStress(
     return sortedLayers[0];
   }
 
-  if (metrics.packetLossPct >= 4 || metrics.rttMs >= 140 || metrics.jitterMs >= 25 || metrics.cpuLoadPct >= 78) {
+  if (metrics.packetLossPct >= 3.5 || metrics.rttMs >= 120 || metrics.jitterMs >= 20 || metrics.cpuLoadPct >= 75) {
     return sortedLayers[Math.min(sortedLayers.indexOf(bitrateCandidate), sortedLayers.indexOf(midLayer))];
   }
 

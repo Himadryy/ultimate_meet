@@ -22,5 +22,15 @@ describe("buildAudioConfig", () => {
     });
     expect(config.warnings.length).toBeGreaterThan(0);
   });
-});
 
+  it("adds stricter talkback guidance for viewers", () => {
+    const config = buildAudioConfig("viewer", {
+      supportsEchoCancellation: true,
+      hasHeadphones: false,
+      outputVolumePct: 65,
+      noisyEnvironment: false
+    });
+    expect(config.autoEnableNoiseSuppression).toBe(true);
+    expect(config.warnings.some((warning) => warning.toLowerCase().includes("talkback"))).toBe(true);
+  });
+});
