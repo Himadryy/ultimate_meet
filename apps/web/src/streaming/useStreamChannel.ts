@@ -27,6 +27,7 @@ interface UseStreamChannelInput {
   >;
   preferredInputDeviceId: string;
   micMuted: boolean;
+  micLevelPct: number;
   sendRelayOffer: (request: { toId: string; channel: "stream"; sdp: string }) => boolean;
   sendRelayAnswer: (request: { toId: string; channel: "stream"; sdp: string }) => boolean;
   sendRelayIce: (request: {
@@ -37,13 +38,15 @@ interface UseStreamChannelInput {
 }
 
 interface UseStreamChannelResult {
-  localStream: MediaStream | null;
-  remoteStream: MediaStream | null;
+  localStreams: MediaStream[];
+  remoteStreams: MediaStream[];
   streamStatus: string;
   iceServerStatus: string;
   networkMetrics: NetworkMetrics | null;
   videoFps: number | null;
   activeVideoLayer: VideoLayer;
+  toggleScreenShare: () => Promise<void>;
+  isScreenSharing: boolean;
 }
 
 const DEFAULT_ACTIVE_LAYER = DEFAULT_VIDEO_LAYERS[DEFAULT_VIDEO_LAYERS.length - 1];
@@ -130,6 +133,7 @@ export function useStreamChannel({
   audioPolicy,
   preferredInputDeviceId,
   micMuted,
+  micLevelPct,
   sendRelayOffer,
   sendRelayAnswer,
   sendRelayIce
@@ -137,18 +141,28 @@ export function useStreamChannel({
   const peersRef = useRef(new Map<string, RTCPeerConnection>());
   const pendingCandidatesRef = useRef(new Map<string, IceCandidatePayload[]>());
   const localStreamRef = useRef<MediaStream | null>(null);
+  const localDisplayStreamRef = useRef<MediaStream | null>(null);
+  const duckingGainNodeRef = useRef<GainNode | null>(null);
   const statsSnapshotsRef = useRef(new Map<string, StatsSnapshotMap>());
   const adaptiveStateRef = useRef(createAdaptiveLayerState(DEFAULT_ACTIVE_LAYER.name));
   const activeLayerRef = useRef(DEFAULT_ACTIVE_LAYER);
   const iceServersRef = useRef<RTCIceServer[]>([]);
 
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  const [localStreams, setLocalStreams] = useState<MediaStream[]>([]);
+  const [remoteStreams, setRemoteStreams] = useState<MediaStream[]>([]);
   const [streamStatus, setStreamStatus] = useState("Waiting to join room.");
   const [networkMetrics, setNetworkMetrics] = useState<NetworkMetrics | null>(null);
   const [videoFps, setVideoFps] = useState<number | null>(null);
   const [activeVideoLayer, setActiveVideoLayer] = useState<VideoLayer>(DEFAULT_ACTIVE_LAYER);
   const [iceServerStatus, setIceServerStatus] = useState("Loading relay profile...");
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+
+  useEffect(() => {
+    if (duckingGainNodeRef.current) {
+      const targetGain = micLevelPct > 15 ? 0.15 : 1.0;
+      duckingGainNodeRef.current.gain.setTargetAtTime(targetGain, duckingGainNodeRef.current.context.currentTime, 0.1);
+    }
+  }, [micLevelPct]);
 
   useEffect(() => {
     let cancelled = false;
@@ -231,15 +245,15 @@ export function useStreamChannel({
   }, []);
 
   const stopLocalStream = useCallback(() => {
-    const stream = localStreamRef.current;
-    if (!stream) {
-      return;
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((t) => t.stop());
+      localStreamRef.current = null;
     }
-    for (const track of stream.getTracks()) {
-      track.stop();
+    if (localDisplayStreamRef.current) {
+      localDisplayStreamRef.current.getTracks().forEach((t) => t.stop());
+      localDisplayStreamRef.current = null;
     }
-    localStreamRef.current = null;
-    setLocalStream(null);
+    setLocalStreams([]);
   }, []);
 
   const queueCandidate = useCallback((peerId: string, candidate: IceCandidatePayload) => {
@@ -290,8 +304,15 @@ export function useStreamChannel({
 
       if (self?.role === "viewer") {
         peer.ontrack = (event) => {
-          const incomingStream = event.streams[0] ?? new MediaStream([event.track]);
-          setRemoteStream(incomingStream);
+          setRemoteStreams((prev) => {
+            const newStreams = [...prev];
+            for (const stream of event.streams) {
+              if (!newStreams.some((s) => s.id === stream.id)) {
+                newStreams.push(stream);
+              }
+            }
+            return newStreams;
+          });
           setStreamStatus(`Subscribed to streamer ${peerId}.`);
         };
       }
@@ -300,7 +321,7 @@ export function useStreamChannel({
         if (peer.connectionState === "failed" || peer.connectionState === "closed") {
           closePeer(peerId);
           if (self?.role === "viewer") {
-            setRemoteStream(null);
+            setRemoteStreams([]);
           }
         }
       };
@@ -311,16 +332,13 @@ export function useStreamChannel({
     [closePeer, roomId, self, sendRelayIce]
   );
 
-  const ensureLocalStream = useCallback(async (): Promise<MediaStream | null> => {
-    if (localStreamRef.current) {
-      return localStreamRef.current;
-    }
-
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setStreamStatus("Browser does not support media capture.");
-      return null;
-    }
-
+  const ensureLocalStreams = useCallback(async (): Promise<MediaStream[]> => {
+    let cameraStream = localStreamRef.current;
+    if (!cameraStream) {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setStreamStatus("Browser does not support media capture.");
+        return [];
+      }
       try {
         const audioConstraint: MediaTrackConstraints = {
           echoCancellation: audioPolicy.autoEnableEchoCancellation,
@@ -330,28 +348,77 @@ export function useStreamChannel({
         if (preferredInputDeviceId) {
           audioConstraint.deviceId = { exact: preferredInputDeviceId };
         }
-        const stream = await navigator.mediaDevices.getUserMedia({
+
+        cameraStream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: audioConstraint
         });
 
-        const videoTrack = stream.getVideoTracks()[0] ?? null;
+        const videoTrack = cameraStream.getVideoTracks()[0] ?? null;
         if (videoTrack) {
           await applyTrackConstraints(videoTrack, activeLayerRef.current);
         }
-        stream.getAudioTracks().forEach((track) => {
-          track.enabled = !micMuted;
+        localStreamRef.current = cameraStream;
+      } catch {
+        setStreamStatus("Could not access camera/microphone.");
+        return [];
+      }
+    }
+
+    let displayStream = localDisplayStreamRef.current;
+    if (isScreenSharing && !displayStream && navigator.mediaDevices.getDisplayMedia) {
+      try {
+        const rawStream = await navigator.mediaDevices.getDisplayMedia({
+          video: { frameRate: { ideal: activeLayerRef.current.fps, max: activeLayerRef.current.fps } },
+          audio: {
+            suppressLocalAudioPlayback: true,
+            echoCancellation: false,
+            noiseSuppression: false
+          } as MediaTrackConstraints
         });
 
-        localStreamRef.current = stream;
-        setLocalStream(stream);
-        setStreamStatus("Publishing local stream to viewers.");
-        return stream;
-    } catch {
-      setStreamStatus("Could not access camera/microphone.");
-      return null;
+        const rawAudioTrack = rawStream.getAudioTracks()[0];
+        if (rawAudioTrack && window.AudioContext) {
+          const audioCtx = new window.AudioContext();
+          const source = audioCtx.createMediaStreamSource(new MediaStream([rawAudioTrack]));
+          const gainNode = audioCtx.createGain();
+          source.connect(gainNode);
+          const dest = audioCtx.createMediaStreamDestination();
+          gainNode.connect(dest);
+          
+          duckingGainNodeRef.current = gainNode;
+          
+          const duckedAudioTrack = dest.stream.getAudioTracks()[0];
+          rawStream.removeTrack(rawAudioTrack);
+          rawStream.addTrack(duckedAudioTrack);
+        }
+
+        displayStream = rawStream;
+        localDisplayStreamRef.current = displayStream;
+        displayStream.getVideoTracks()[0].onended = () => {
+          // Re-trigger by turning off screen sharing
+          setIsScreenSharing(false);
+        };
+      } catch {
+        setIsScreenSharing(false);
+      }
+    } else if (!isScreenSharing && displayStream) {
+      displayStream.getTracks().forEach((t) => t.stop());
+      localDisplayStreamRef.current = null;
+      displayStream = null;
     }
-  }, [audioPolicy, micMuted, preferredInputDeviceId]);
+
+    if (cameraStream) {
+      cameraStream.getAudioTracks().forEach((track) => {
+        track.enabled = !micMuted;
+      });
+    }
+
+    const activeStreams = [cameraStream, displayStream].filter(Boolean) as MediaStream[];
+    setLocalStreams(activeStreams);
+    setStreamStatus("Publishing local stream(s) to viewers.");
+    return activeStreams;
+  }, [audioPolicy, micMuted, preferredInputDeviceId, isScreenSharing]);
 
   useEffect(() => {
     localStreamRef.current?.getAudioTracks().forEach((track) => {
@@ -359,30 +426,52 @@ export function useStreamChannel({
     });
   }, [micMuted]);
 
+  const toggleScreenShare = useCallback(async () => {
+    setIsScreenSharing((prev) => !prev);
+    // Since publishToViewer handles the current state of tracks and negotiation,
+    // we can rely on a useEffect to trigger publishToViewer when isScreenSharing changes.
+  }, []);
+
   const publishToViewer = useCallback(
     async (viewerId: string) => {
       if (!self || self.role !== "streamer" || !roomId) {
         return;
       }
 
-      const stream = await ensureLocalStream();
-      if (!stream) {
+      const streams = await ensureLocalStreams();
+      if (streams.length === 0) {
         return;
       }
 
       const peer = createPeer(viewerId);
-      for (const track of stream.getTracks()) {
-        const hasTrack = peer
-          .getSenders()
-          .some((sender) => sender.track && sender.track.id === track.id);
-        if (!hasTrack) {
-          peer.addTrack(track, stream);
+      
+      let needsNegotiation = false;
+      
+      for (const sender of peer.getSenders()) {
+        if (sender.track) {
+          const stillExists = streams.some((s) => s.getTracks().includes(sender.track!));
+          if (!stillExists) {
+            peer.removeTrack(sender);
+            needsNegotiation = true;
+          }
+        }
+      }
+
+      for (const stream of streams) {
+        for (const track of stream.getTracks()) {
+          const hasTrack = peer
+            .getSenders()
+            .some((sender) => sender.track && sender.track.id === track.id);
+          if (!hasTrack) {
+            peer.addTrack(track, stream);
+            needsNegotiation = true;
+          }
         }
       }
 
       await applyLayerToPeer(peer, activeLayerRef.current);
 
-      if (peer.signalingState !== "stable" || peer.currentRemoteDescription) {
+      if (!needsNegotiation && peer.currentLocalDescription) {
         return;
       }
 
@@ -399,7 +488,7 @@ export function useStreamChannel({
         sdp: offer.sdp
       });
     },
-    [applyLayerToPeer, createPeer, ensureLocalStream, roomId, self, sendRelayOffer]
+    [applyLayerToPeer, createPeer, ensureLocalStreams, roomId, self, sendRelayOffer]
   );
 
   const processRelayOffer = useCallback(
@@ -464,14 +553,14 @@ export function useStreamChannel({
     if (!roomId || !self) {
       closeAllPeers();
       stopLocalStream();
-      setRemoteStream(null);
+      setRemoteStreams([]);
       resetAdaptiveState();
       setStreamStatus("Waiting to join room.");
       return;
     }
 
     if (self.role === "streamer") {
-      setRemoteStream(null);
+      setRemoteStreams([]);
       const viewerIds = listStreamRecipients(participants, self.id, self.role);
       for (const viewerId of viewerIds) {
         void publishToViewer(viewerId);
@@ -490,7 +579,7 @@ export function useStreamChannel({
     stopLocalStream();
     const streamer = findActiveStreamer(participants, self.id);
     if (!streamer) {
-      setRemoteStream(null);
+      setRemoteStreams([]);
       setStreamStatus("Viewer connected. Waiting for streamer.");
     }
   }, [
@@ -609,7 +698,7 @@ export function useStreamChannel({
       if (self.role === "viewer") {
         const streamer = findActiveStreamer(participants, self.id);
         if (!streamer) {
-          setRemoteStream(null);
+          setRemoteStreams([]);
         }
       }
       return;
@@ -656,13 +745,24 @@ export function useStreamChannel({
     [closeAllPeers, stopLocalStream]
   );
 
+  useEffect(() => {
+    if (self?.role === "streamer" && roomId) {
+      const viewerIds = listStreamRecipients(participants, self.id, self.role);
+      for (const viewerId of viewerIds) {
+        void publishToViewer(viewerId);
+      }
+    }
+  }, [isScreenSharing, self, roomId, participants, publishToViewer]);
+
   return {
-    localStream,
-    remoteStream,
+    localStreams,
+    remoteStreams,
     streamStatus,
     iceServerStatus,
     networkMetrics,
     videoFps,
-    activeVideoLayer
+    activeVideoLayer,
+    toggleScreenShare,
+    isScreenSharing
   };
 }

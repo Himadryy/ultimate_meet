@@ -188,17 +188,30 @@ export function useAudioControls(options: UseAudioControlsOptions) {
     setSelectedOutputId(deviceId);
   }, []);
 
-  const attachOutputStream = useCallback(
-    async (stream: MediaStream | null) => {
+  const attachOutputStreams = useCallback(
+    async (streams: MediaStream[]) => {
       const element = outputAudioRef.current;
       if (!element) {
         return;
       }
-      if (element.srcObject !== stream) {
-        element.srcObject = stream;
-      }
-      if (!stream) {
+      
+      const allAudioTracks = streams.flatMap(s => s.getAudioTracks());
+      
+      if (allAudioTracks.length === 0) {
+        if (element.srcObject) {
+           element.srcObject = null;
+        }
         return;
+      }
+
+      // Instead of relying on Web Audio API here, an easy cross-browser way 
+      // is to just create a single MediaStream with all audio tracks
+      // Note: If tracks change often, this creates a new stream each time,
+      // but it's acceptable for this scale.
+      const compositeStream = new MediaStream(allAudioTracks);
+
+      if (element.srcObject !== compositeStream) {
+        element.srcObject = compositeStream;
       }
       try {
         await element.play();
@@ -279,7 +292,7 @@ export function useAudioControls(options: UseAudioControlsOptions) {
     supportsOutputSelection,
     hasHeadphones,
     outputAudioRef,
-    attachOutputStream,
+    attachOutputStreams,
     setSpeakerMuted,
     setSpeakerVolumePct,
     selectInputDevice,

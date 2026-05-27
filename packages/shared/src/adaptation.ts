@@ -19,7 +19,7 @@ export const DEFAULT_VIDEO_LAYERS: VideoLayer[] = [
   { name: "mid", width: 960, height: 540, fps: 24, targetBitrateKbps: 950 },
   { name: "high", width: 1280, height: 720, fps: 30, targetBitrateKbps: 1800 },
   { name: "hd", width: 1600, height: 900, fps: 30, targetBitrateKbps: 2400 },
-  { name: "fullhd", width: 1920, height: 1080, fps: 30, targetBitrateKbps: 3200 }
+  { name: "fullhd", width: 1920, height: 1080, fps: 60, targetBitrateKbps: 4500 }
 ];
 
 type VideoLayerName = VideoLayer["name"];

@@ -31,29 +31,29 @@ function MediaTile({ title, stream, muted, placeholder }: MediaTileProps) {
 
 interface MediaStageProps {
   role: ParticipantRole;
-  localStream: MediaStream | null;
-  remoteStream: MediaStream | null;
+  localStreams: MediaStream[];
+  remoteStreams: MediaStream[];
 }
 
-export function MediaStage({ role, localStream, remoteStream }: MediaStageProps) {
+export function MediaStage({ role, localStreams, remoteStreams }: MediaStageProps) {
+  const streams = role === "streamer" ? localStreams : remoteStreams;
+  
   return (
     <section className="card">
       <h2>Live Stage</h2>
       <div className="media-grid">
-        {role === "streamer" ? (
-          <MediaTile
-            title="Studio Preview"
-            stream={localStream}
-            muted
-            placeholder="Allow camera/mic permission to publish stream."
-          />
+        {streams.length === 0 ? (
+          <p>{role === "streamer" ? "Allow camera/mic permission to publish stream." : "Waiting for streamer media."}</p>
         ) : (
-          <MediaTile
-            title="Host Feed"
-            stream={remoteStream}
-            muted
-            placeholder="Waiting for streamer media."
-          />
+          streams.map((stream, index) => (
+            <MediaTile
+              key={stream.id || index}
+              title={role === "streamer" ? `Studio Preview ${index + 1}` : `Host Feed ${index + 1}`}
+              stream={stream}
+              muted={role === "streamer"}
+              placeholder=""
+            />
+          ))
         )}
       </div>
     </section>

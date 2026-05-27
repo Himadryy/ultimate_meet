@@ -83,7 +83,7 @@ export default function App() {
   const viewerTalkbackProtectionEnabled =
     role === "viewer" && !audioControls.hasHeadphones && audioControls.speakerVolumePct > 55;
 
-  const { localStream, remoteStream, streamStatus, iceServerStatus, networkMetrics, videoFps, activeVideoLayer } =
+  const { localStreams, remoteStreams, streamStatus, iceServerStatus, networkMetrics, videoFps, activeVideoLayer, toggleScreenShare, isScreenSharing } =
     useStreamChannel({
       roomId: signaling.roomId,
       self: signaling.self,
@@ -92,6 +92,7 @@ export default function App() {
       audioPolicy,
       preferredInputDeviceId: audioControls.selectedInputId,
       micMuted: audioControls.micMuted,
+      micLevelPct: audioControls.micLevelPct,
       sendRelayOffer: signaling.sendRelayOffer,
       sendRelayAnswer: signaling.sendRelayAnswer,
       sendRelayIce: signaling.sendRelayIce
@@ -116,8 +117,8 @@ export default function App() {
   });
 
   useEffect(() => {
-    void audioControls.attachOutputStream(remoteStream);
-  }, [audioControls.attachOutputStream, remoteStream]);
+    void audioControls.attachOutputStreams(remoteStreams);
+  }, [audioControls.attachOutputStreams, remoteStreams]);
 
   function joinRoom() {
     const nextParticipantId = participantId.trim();
@@ -202,6 +203,11 @@ export default function App() {
             <button type="button" onClick={signaling.leaveRoom}>
               Leave Room
             </button>
+            {role === "streamer" && connected && (
+              <button type="button" onClick={() => void toggleScreenShare()}>
+                {isScreenSharing ? "Stop Screen Share" : "Share Screen"}
+              </button>
+            )}
           </div>
           <p className="status">{statusOverride ?? signaling.status}</p>
           <p className="status">{iceServerStatus}</p>
@@ -210,7 +216,7 @@ export default function App() {
         <ParticipantsList participants={signaling.participants} />
       </div>
 
-      <MediaStage role={role} localStream={localStream} remoteStream={remoteStream} />
+      <MediaStage role={role} localStreams={localStreams} remoteStreams={remoteStreams} />
 
       <section className="card">
         <h2>Adaptive Stream Policy</h2>
