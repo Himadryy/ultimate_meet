@@ -11,6 +11,7 @@ import { ParticipantsList } from "./components/ParticipantsList";
 import { TelemetryDebugPanel } from "./components/TelemetryDebugPanel";
 import { useSignalingRoom } from "./hooks/useSignalingRoom";
 import { useStreamChannel } from "./streaming/useStreamChannel";
+import { useTalkbackChannel } from "./streaming/useTalkbackChannel";
 import { useMediaTelemetry } from "./telemetry/useMediaTelemetry";
 
 const TELEMETRY_REFRESH_MS = 1_000;
@@ -100,6 +101,19 @@ export default function App() {
       sendRelayIce: signaling.sendRelayIce
     });
 
+  const { remoteTalkbackStreams } = useTalkbackChannel({
+    roomId: signaling.roomId,
+    self: signaling.self,
+    participants: signaling.participants,
+    lastMessage: signaling.lastMessage,
+    talkbackEnabled: self?.talkbackEnabled ?? talkbackEnabled,
+    micMuted: audioControls.micMuted,
+    preferredInputDeviceId: audioControls.selectedInputId,
+    sendRelayOffer: signaling.sendRelayOffer,
+    sendRelayAnswer: signaling.sendRelayAnswer,
+    sendRelayIce: signaling.sendRelayIce
+  });
+
   const echoGuidance = useMemo(
     () =>
       buildEchoRiskGuidance(audioPolicy, {
@@ -119,8 +133,8 @@ export default function App() {
   });
 
   useEffect(() => {
-    void audioControls.attachOutputStreams(remoteStreams);
-  }, [audioControls.attachOutputStreams, remoteStreams]);
+    void audioControls.attachOutputStreams([...remoteStreams, ...remoteTalkbackStreams]);
+  }, [audioControls.attachOutputStreams, remoteStreams, remoteTalkbackStreams]);
 
   function joinRoom() {
     const nextParticipantId = participantId.trim();

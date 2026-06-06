@@ -379,6 +379,11 @@ export function useStreamChannel({
           } as MediaTrackConstraints
         });
 
+        const rawVideoTrack = rawStream.getVideoTracks()[0];
+        if (rawVideoTrack && "contentHint" in rawVideoTrack) {
+          rawVideoTrack.contentHint = "motion";
+        }
+
         const rawAudioTrack = rawStream.getAudioTracks()[0];
         if (rawAudioTrack && window.AudioContext) {
           const audioCtx = new window.AudioContext();
