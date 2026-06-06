@@ -27,6 +27,7 @@ interface UseStreamChannelInput {
   >;
   preferredInputDeviceId: string;
   micMuted: boolean;
+  cameraMuted: boolean;
   micLevelPct: number;
   sendRelayOffer: (request: { toId: string; channel: "stream"; sdp: string }) => boolean;
   sendRelayAnswer: (request: { toId: string; channel: "stream"; sdp: string }) => boolean;
@@ -133,6 +134,7 @@ export function useStreamChannel({
   audioPolicy,
   preferredInputDeviceId,
   micMuted,
+  cameraMuted,
   micLevelPct,
   sendRelayOffer,
   sendRelayAnswer,
@@ -407,10 +409,12 @@ export function useStreamChannel({
       localDisplayStreamRef.current = null;
       displayStream = null;
     }
-
     if (cameraStream) {
       cameraStream.getAudioTracks().forEach((track) => {
         track.enabled = !micMuted;
+      });
+      cameraStream.getVideoTracks().forEach((track) => {
+        track.enabled = !cameraMuted;
       });
     }
 
@@ -418,13 +422,19 @@ export function useStreamChannel({
     setLocalStreams(activeStreams);
     setStreamStatus("Publishing local stream(s) to viewers.");
     return activeStreams;
-  }, [audioPolicy, micMuted, preferredInputDeviceId, isScreenSharing]);
+  }, [audioPolicy, micMuted, cameraMuted, preferredInputDeviceId, isScreenSharing]);
 
   useEffect(() => {
     localStreamRef.current?.getAudioTracks().forEach((track) => {
       track.enabled = !micMuted;
     });
   }, [micMuted]);
+
+  useEffect(() => {
+    localStreamRef.current?.getVideoTracks().forEach((track) => {
+      track.enabled = !cameraMuted;
+    });
+  }, [cameraMuted]);
 
   const toggleScreenShare = useCallback(async () => {
     setIsScreenSharing((prev) => !prev);

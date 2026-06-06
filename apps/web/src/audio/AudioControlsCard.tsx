@@ -5,6 +5,8 @@ import type { AudioDeviceOption } from "./audioDeviceUtils";
 interface AudioControlsCardProps {
   role: ParticipantRole;
   micMuted: boolean;
+  cameraMuted: boolean;
+  isScreenSharing: boolean;
   speakerMuted: boolean;
   speakerVolumePct: number;
   micLevelPct: number;
@@ -23,6 +25,8 @@ interface AudioControlsCardProps {
   echoRecommendations: string[];
   outputAudioRef: RefObject<HTMLAudioElement | null>;
   onToggleMicMuted: () => void;
+  onToggleCameraMuted: () => void;
+  onToggleScreenShare: () => void;
   onToggleSpeakerMuted: () => void;
   onSpeakerVolumeChange: (value: number) => void;
   onInputDeviceChange: (deviceId: string) => void;
@@ -34,6 +38,8 @@ export function AudioControlsCard(props: AudioControlsCardProps) {
   const {
     role,
     micMuted,
+    cameraMuted,
+    isScreenSharing,
     speakerMuted,
     speakerVolumePct,
     micLevelPct,
@@ -52,6 +58,8 @@ export function AudioControlsCard(props: AudioControlsCardProps) {
     echoRecommendations,
     outputAudioRef,
     onToggleMicMuted,
+    onToggleCameraMuted,
+    onToggleScreenShare,
     onToggleSpeakerMuted,
     onSpeakerVolumeChange,
     onInputDeviceChange,
@@ -61,11 +69,21 @@ export function AudioControlsCard(props: AudioControlsCardProps) {
 
   return (
     <section className="card">
-      <h2>Audio Studio</h2>
+      <h2>Media Studio Controls</h2>
       <div className="control-row">
         <button type="button" onClick={onToggleMicMuted}>
           {micMuted ? "Unmute Mic" : "Mute Mic"}
         </button>
+        {role === "streamer" && (
+          <button type="button" onClick={onToggleCameraMuted}>
+            {cameraMuted ? "Turn On Camera" : "Turn Off Camera"}
+          </button>
+        )}
+        {role === "streamer" && (
+          <button type="button" onClick={onToggleScreenShare}>
+            {isScreenSharing ? "Stop Screen Share" : "Share Screen"}
+          </button>
+        )}
         <button type="button" onClick={onToggleSpeakerMuted}>
           {speakerMuted ? "Undeafen Speaker" : "Deafen Speaker"}
         </button>

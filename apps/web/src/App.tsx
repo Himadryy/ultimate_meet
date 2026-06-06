@@ -20,6 +20,7 @@ export default function App() {
   const [participantId, setParticipantId] = useState("");
   const [roomId, setRoomId] = useState("alpha-room");
   const [talkbackEnabled, setTalkbackEnabled] = useState(false);
+  const [cameraMuted, setCameraMuted] = useState(false);
   const [statusOverride, setStatusOverride] = useState<string | null>(null);
   const [supportsEchoCancellation, setSupportsEchoCancellation] = useState(true);
 
@@ -92,6 +93,7 @@ export default function App() {
       audioPolicy,
       preferredInputDeviceId: audioControls.selectedInputId,
       micMuted: audioControls.micMuted,
+      cameraMuted,
       micLevelPct: audioControls.micLevelPct,
       sendRelayOffer: signaling.sendRelayOffer,
       sendRelayAnswer: signaling.sendRelayAnswer,
@@ -241,6 +243,8 @@ export default function App() {
       <AudioControlsCard
         role={role}
         micMuted={audioControls.micMuted}
+        cameraMuted={cameraMuted}
+        isScreenSharing={isScreenSharing}
         speakerMuted={audioControls.speakerMuted}
         speakerVolumePct={audioControls.speakerVolumePct}
         micLevelPct={audioControls.micLevelPct}
@@ -265,6 +269,8 @@ export default function App() {
         onToggleMicMuted={() => {
           void audioControls.toggleMicMuted();
         }}
+        onToggleCameraMuted={() => setCameraMuted((prev) => !prev)}
+        onToggleScreenShare={() => void toggleScreenShare()}
         onToggleSpeakerMuted={() => audioControls.setSpeakerMuted((current) => !current)}
         onSpeakerVolumeChange={audioControls.setSpeakerVolumePct}
         onInputDeviceChange={(deviceId) => {
